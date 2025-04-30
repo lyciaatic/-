@@ -70,7 +70,10 @@ class Conv2D(Layer):
 ```
 ## 训练过程
 1. 完成第二项优化算法：动量随机梯度下降，实现更新规则![image](https://github.com/user-attachments/assets/df191664-70c6-4cf8-9c34-ceacb1d5475b)固定动量系数$`\beta`$<sub>t</sub>=0.9，加速收敛减少振荡。训练中调整学习率$`\alpha`$<sub>t</sub>，平衡初始收敛速度和最终优化精度。
-2. 完成第四项损失函数：交叉熵损失。与输出层Softmax结合，计算预测概率和真实值的差异![image](https://github.com/user-attachments/assets/90a63cfe-3065-4ed2-84f6-eaf7cec9a02c)，其中$`y`$<sub>i,c</sub>为独热编码，$`p`$<sub>i,c</sub>为类别c的预测概率。
+2. 完成第三项正则化：L2正则化。在损失函数中添加权重惩罚项以抑制过拟合。![image](https://github.com/user-attachments/assets/659e2d6c-fc39-4015-9bea-cbd3caa34565)为正则化强度，控制权重衰减程度。
+3. 完成第四项损失函数：交叉熵损失。与输出层Softmax结合，计算预测概率和真实值的差异![image](https://github.com/user-attachments/assets/90a63cfe-3065-4ed2-84f6-eaf7cec9a02c)，其中$`y`$<sub>i,c</sub>为独热编码，$`p`$<sub>i,c</sub>为类别c的预测概率。
+
+## 模型配置
 
  
 
