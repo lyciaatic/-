@@ -1,15 +1,14 @@
-# 手动实现深度神经网络
+# Project 1 “神经网络与深度学习”项目报告
 
-这个项目使用纯NumPy实现了一个深度学习框架，包括从基本组件到复杂模型的所有内容，用于MNIST手写数字识别任务。
+这个项目使用纯NumPy实现了一个深度学习框架，包括从基本组件到复杂模型的所有内容，用于MNIST手写数字识别任务。通过实现多层感知机（MLP）、卷积神经网络（CNN）和残差网络（ResNet）探索不同优化策略、正则化方法及网络结构对模型性能的影响。核心组包括卷积层、全连接层、BatchNorm、Dropout、动量优化器等。
 
 ## 项目结构
-
 - `neural_network.py`: 包含基本网络组件（层、激活函数、优化器等）的实现
 - `models.py`: 包含不同模型架构的实现（MLP、CNN、ResNet）
 - `train.py`: 训练和测试的主程序
 
-## 内容
-1. MLP 通过列表layers定义各层神经元数量，其中有输入层、隐藏层和输出层
+## 核心功能实现
+1. 网络结构的灵活配置：MLP 通过列表layers定义各层神经元数量，其中有输入层、隐藏层和输出层
    ```bash
    class MLP(Model):
     """多层感知机模型"""
@@ -49,7 +48,79 @@ class LeakyReLU(Layer):
     def backward(self, grad):
         return grad * np.where(self.input > 0, 1, self.alpha)
 ```   
-  -dropout正则化，训练过程中随机将部分神经元输出置0，防止过拟合，通过`dropout`参数控制失活概率
+   - 实验结果：不同隐藏层MLP对比；MLP-2(512+128隐藏层)验证集准确率更高为92.2%，MLP-1（256+128隐藏层）验证集准确率为91.8%。更多隐藏层提升模型能力，不过需要正则化避免过拟合。
+2. 动量法优化训练
+- 通过`MomentumSGD`类实现动量更新，显著加速收敛
+```bash
+class MomentumSGD:
+    """带动量的随机梯度下降优化器"""
+    def __init__(self, model, learning_rate=0.01, momentum=0.9):
+        self.model = model
+        self.learning_rate = learning_rate
+        self.momentum = momentum
+        self.velocities = {}
+        
+        # 初始化速度
+        for i, layer in enumerate(model.layers):
+            if hasattr(layer, 'params') and hasattr(layer, 'grads'):
+                self.velocities[i] = {}
+                for param_name in layer.params:
+                    self.velocities[i][param_name] = np.zeros_like(layer.params[param_name])
+    
+    def step(self):
+        """执行一次带动量的梯度更新"""
+        for i, layer in enumerate(self.model.layers):
+            if hasattr(layer, 'params') and hasattr(layer, 'grads') and layer.grads is not None:
+                for param_name in layer.params:
+                    if layer.grads[param_name] is not None:
+                        # 更新速度
+                        self.velocities[i][param_name] = (
+                            self.momentum * self.velocities[i][param_name] - 
+                            self.learning_rate * layer.grads[param_name]
+                        )
+                        # 更新参数
+                        layer.params[param_name] += self.velocities[i][param_name]
+                        # 更新实际参数值
+                        setattr(layer, param_name, layer.params[param_name])
+```
+   - 实验结果：动量系数$`\beta`$影响：$`\beta`$=0.9相比原始SGD（$`\beta`$=0）减少训练振荡，收敛速度提升15%；验证集准确率从90.6%提升至94.6%
+3. L2正则化和dropout正则化，训练过程中随机将部分神经元输出置0，防止过拟合，通过`dropout`参数控制失活概率
+```bash
+class Linear(Layer):
+    """全连接层"""
+    def __init__(self, in_dim, out_dim, weight_decay=0, weight_decay_lambda=1e-4):
+        super().__init__()
+        # Xavier初始化
+        scale = np.sqrt(2.0 / (in_dim + out_dim))
+        self.W = np.random.normal(0, scale, (in_dim, out_dim))
+        self.b = np.zeros((1, out_dim))
+        
+        self.params = {'W': self.W, 'b': self.b}
+        self.grads = {'W': None, 'b': None}
+        self.input = None
+        self.weight_decay = weight_decay
+        self.weight_decay_lambda = weight_decay_lambda
+    
+    def forward(self, inputs):
+        self.input = inputs
+        return np.dot(inputs, self.W) + self.b
+    
+    def backward(self, grad):
+        # 计算参数梯度
+        dW = np.dot(self.input.T, grad)
+        if self.weight_decay > 0:
+            dW += self.weight_decay_lambda * self.W
+        db = np.sum(grad, axis=0, keepdims=True)
+        
+        # 计算输入梯度
+        dX = np.dot(grad, self.W.T)
+        
+        # 保存梯度
+        self.grads['W'] = dW
+        self.grads['b'] = db
+        
+        return dX
+```
   ```bash
 class Dropout(Layer):
     """Dropout层，用于防止过拟合"""
@@ -60,14 +131,127 @@ class Dropout(Layer):
         self.training = True
         self.optimizable = False
 ```
-2.卷积神经网络CNN：集成自定义的`Conv2D`层，后续连接MLP。模型包括：
+   - 实验结果：
+   - L2正则化：
+        -  $`\lambda`$=0.001使验证准确率比无正则化高1.4%，缓解过拟合
+        -  $`\lambda`$=0.01过大，导致欠拟合，准确率显著下降
+4. Softmax与交叉熵损失
+```bash
+class CrossEntropyLoss(Layer):
+    """交叉熵损失函数"""
+    def __init__(self, model=None):
+        super().__init__()
+        self.model = model
+        self.y_pred = None
+        self.y_true = None
+        self.batch_size = None
+        self.optimizable = False
+    
+    def forward(self, y_pred, y_true):
+        self.batch_size = y_pred.shape[0]
+        self.y_true = y_true
+        
+        # 应用softmax
+        self.y_pred = softmax(y_pred)
+        
+        # 计算交叉熵损失
+        eps = 1e-8  # 数值稳定性
+        indices = np.arange(self.batch_size)
+        loss = -np.sum(np.log(self.y_pred[indices, y_true] + eps)) / self.batch_size
+        
+        return loss
+    
+    def backward(self):
+        # 初始化梯度
+        grad = self.y_pred.copy()
+        indices = np.arange(self.batch_size)
+        
+        # 设置真实类别处的梯度
+        grad[indices, self.y_true] -= 1
+        
+        # 归一化梯度
+        grad /= self.batch_size
+        
+        # 如果模型不为空，则传递梯度
+        if self.model is not None:
+            self.model.backward(grad)
+        
+        return grad
+```
+   - 实验结果：交叉熵和MSE对比显示，交叉熵准确率91.4%，MSE准确率90.8%。Softmax+交叉熵更适配多分类任务，梯度更新更高效     
+5. 卷积神经网络CNN：集成自定义的`Conv2D`层，后续连接MLP。模型包括：
   -Conv2D层：通过可学习的卷积核计算特征图，支持参数包括输入通道、输出通道、步长、填充。
   ```bash
 class Conv2D(Layer):
     """二维卷积层"""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, weight_decay=0, weight_decay_lambda=1e-4):
         super().__init__()
+……
+def _im2col(self, X):
+        """
+        输入:
+            X: (N, C, H, W)
+        输出:
+            cols: (N*out_h*out_w, C*k_h*k_w)
+        """
+        N, C, H, W = X.shape
+        k_h, k_w = self.kernel_size
+        s_h, s_w = self.stride
+        p_h, p_w = self.padding
+……
+def forward(self, inputs):
+        """前向传播"""
+        self.input_shape = inputs.shape
+        N = inputs.shape[0]
+        
+        # 展开输入
+        self.X_cols, (N, out_h, out_w) = self._im2col(inputs)
+        
+        # 展开权重矩阵为二维矩阵
+        W_row = self.W.reshape(self.out_channels, -1)
+        
+        # 矩阵乘法
+        out = np.dot(self.X_cols, W_row.T) + self.b
+        
+        # 重塑为四维输出
+        out = out.reshape(N, out_h, out_w, self.out_channels).transpose(0, 3, 1, 2)
+        
+        return out
+    
+    def backward(self, grad):
+        """反向传播"""
+        N = self.input_shape[0]
+        
+        # 重塑梯度为二维矩阵
+        grad_reshaped = grad.transpose(0, 2, 3, 1).reshape(-1, self.out_channels)
+        
+        # 计算偏置梯度
+        db = np.sum(grad_reshaped, axis=0)
+        
+        # 计算权重梯度
+        dW = np.dot(grad_reshaped.T, self.X_cols)
+        dW = dW.reshape(self.W.shape)
+        
+        # 计算输入梯度
+        W_row = self.W.reshape(self.out_channels, -1)
+        dX_cols = np.dot(grad_reshaped, W_row)
+        dX = self._col2im(dX_cols, self.input_shape)
+        
+        # 添加L2正则化
+        if self.weight_decay:
+            dW += self.weight_decay_lambda * self.W
+        
+        # 保存参数梯度
+        self.grads['W'] = dW
+        self.grads['b'] = db
+        
+        return dX
 ```
+   - 实验结果：CNN和MLP对比
+    - CNN-1测试准确率达到93.4%，高于MLP-1
+    - 自定义`Conv2D`层通过`im2col`技术比朴素循环实现快30%
+
+   
 ## 训练过程
 1. 完成第二项优化算法：动量随机梯度下降，实现更新规则![image](https://github.com/user-attachments/assets/df191664-70c6-4cf8-9c34-ceacb1d5475b)固定动量系数$`\beta`$<sub>t</sub>=0.9，加速收敛减少振荡。训练中调整学习率$`\alpha`$<sub>t</sub>，平衡初始收敛速度和最终优化精度。
 2. 完成第三项正则化：L2正则化。在损失函数中添加权重惩罚项以抑制过拟合。![image](https://github.com/user-attachments/assets/659e2d6c-fc39-4015-9bea-cbd3caa34565)为正则化强度，控制权重衰减程度。
@@ -85,16 +269,9 @@ class Conv2D(Layer):
    4. 验证频率：每五轮使用验证集评估一次
 
 ## 结果分析
-- 不同隐藏层MLP对比：MLP-2(512+128隐藏层)验证集准确率更高为92.2%，MLP-1（256+128隐藏层）验证集准确率为91.8%。更多隐藏层提升模型能力，不过需要正则化避免过拟合。
-- 动量系数$`\beta`$影响：$`\beta`$=0.9相比原始SGD（$`\beta`$=0）减少训练振荡，收敛速度提升15%；验证集准确率从90.6%提升至94.6%
-- L2正则化：
-  - $`\lambda`$=0.001使验证准确率比无正则化高1.4%，缓解过拟合
-  - $`\lambda`$=0.01过大，导致欠拟合，准确率显著下降
+
 - Dropout中p的影响
    - p=0.5引入过多随机性，导致训练不稳定，准确率下降至86.6%，最优p值需要根据网络深度调整。
-- CNN和MLP对比
-    - CNN-1测试准确率达到93.4%，高于MLP-1的91.8%。
-    - 自定义`Conv2D`层通过`im2col`技术比朴素循环实现快30%
 - 数据增强效果
     - 应用$`\pm2`$像素平移，22×22随机裁剪填充。训练数据扩充四倍，测试准确率提升3.1%，泛化能力显著提高。
 
