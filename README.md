@@ -8,6 +8,69 @@
 - `models.py`: 包含不同模型架构的实现（MLP、CNN、ResNet）
 - `train.py`: 训练和测试的主程序
 
+## 内容
+1. MLP 通过列表layers定义各层神经元数量，其中有输入层、隐藏层和输出层
+   ```bash
+   class MLP(Model):
+    """多层感知机模型"""
+    def __init__(self, input_dim=784, hidden_dims=[256, 128], num_classes=10, use_dropout=True, dropout_rate=0.5):
+        super().__init__()
+        
+        # 输入层 -> 第一个隐藏层
+        self.layers.append(Linear(input_dim, hidden_dims[0], weight_decay=1e-4))
+        self.layers.append(ReLU())
+        if use_dropout:
+            self.layers.append(Dropout(dropout_rate))
+        
+        # 隐藏层
+        for i in range(len(hidden_dims) - 1):
+            self.layers.append(Linear(hidden_dims[i], hidden_dims[i+1], weight_decay=1e-4))
+            self.layers.append(ReLU())
+            if use_dropout:
+                self.layers.append(Dropout(dropout_rate))
+        
+        # 输出层
+        self.layers.append(Linear(hidden_dims[-1], num_classes))
+   ```
+  -激活函数：隐藏层使用`LeakyReLU`，输出层使用`Softmax`将对数输出转换为类别概率
+```bash
+class LeakyReLU(Layer):
+    """LeakyReLU激活函数"""
+    def __init__(self, alpha=0.01):
+        super().__init__()
+        self.alpha = alpha
+        self.input = None
+        self.optimizable = False
+    
+    def forward(self, inputs):
+        self.input = inputs
+        return np.maximum(self.alpha * inputs, inputs)
+    
+    def backward(self, grad):
+        return grad * np.where(self.input > 0, 1, self.alpha)
+```   
+  -dropout正则化，训练过程中随机将部分神经元输出置0，防止过拟合，通过`dropout`参数控制失活概率
+  ```bash
+class Dropout(Layer):
+    """Dropout层，用于防止过拟合"""
+    def __init__(self, drop_rate=0.5):
+        super().__init__()
+        self.drop_rate = drop_rate
+        self.mask = None
+        self.training = True
+        self.optimizable = False
+```
+2.卷积神经网络CNN：集成自定义的`Conv2D`层，后续连接MLP。模型包括：
+  -Conv2D层：通过可学习的卷积核计算特征图，支持参数包括输入通道、输出通道、步长、填充。
+  ```bash
+class Conv2D(Layer):
+    """二维卷积层"""
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, weight_decay=0, weight_decay_lambda=1e-4):
+        super().__init__()
+```
+## 训练过程
+1. 
+
 ## 特点
 
 - 纯NumPy实现，不依赖任何深度学习框架
