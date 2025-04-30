@@ -269,11 +269,28 @@ def forward(self, inputs):
    4. 验证频率：每五轮使用验证集评估一次
 
 ## 结果分析
-
 - Dropout中p的影响
    - p=0.5引入过多随机性，导致训练不稳定，准确率下降至86.6%，最优p值需要根据网络深度调整。
-- 数据增强效果
-    - 应用$`\pm2`$像素平移，22×22随机裁剪填充。训练数据扩充四倍，测试准确率提升3.1%，泛化能力显著提高。
+- 卷积核权重可视化结果
+   - `cnn_filters_layer1.png`提取CNN模型第一层卷积核
+![cnn_filters_layer1](https://github.com/user-attachments/assets/0ef02e1a-cf44-46b6-bf89-ffcad942ef94)
+   - `cnn_filters_layer2.png`提取CNN模型第二层卷积核，卷积层通过分层特征提取，逐步抽象图像信息![cnn_filters_layer2](https://github.com/user-attachments/assets/e9dcc6e2-5a14-4295-a220-20524954f3ea)
+- CNN模型训练曲线
+   - 由`cnn_training.png`图片可知，训练损失从0.35快速下降到0.05，验证损失同步下降，无过拟合,；训练准确率最后达98%，验证准确率达96%+；CNN模型收敛速度快，泛化能力良好![cnn_training](https://github.com/user-attachments/assets/e7843643-c95c-4728-931f-d65ed2323c9a)
+- MLP和改进后曲线对比
+   - `mlp_training.png`原始MLP训练损失震荡较大，验证准确率小于90%
+   - `improved_mlp_training.png`增加Dropout和L2正则的改进MLP的损失平滑下降至0.1，验证准确率达到92%以上
+     ![mlp_training](https://github.com/user-attachments/assets/eb5877ff-58cd-4dd6-a101-66fa6780902a)
+     ![improved_mlp_training](https://github.com/user-attachments/assets/5ae77dac-0bd5-428e-b298-16ed759fcd36)
+- 模型性能
+   - 验证集表现表明CNN在特征提取和泛化能力上表现优于MLP
+     1. `model_comparison_acc.png`准确率方面：CNN（98%）＞改进MLP（96%）＞MLP（92%）
+![model_comparison_acc](https://github.com/user-attachments/assets/c5a4a518-dee4-4da0-b487-19ea8b1c4877)
+     2. `model_comparison_loss.png`损失方面：CNN（5%）＜改进MLP（10%）＜MLP（30%）
+![model_comparison_loss](https://github.com/user-attachments/assets/1e7ea417-5395-4e3e-bd8d-bdc33e7913e6)
+- 测试结果
+   - `test_accuracy_comparison.png``test_loss_comparison.png`分别是测试准确率和测试loss，可视化结果表明CNN在测试集表现是三者中最佳，改进MLP相比MLP在准确率和loss方面表现更好![test_accuracy_comparison](https://github.com/user-attachments/assets/9a2cda65-6acb-4365-9e33-1802b0aac305)![test_loss_comparison](https://github.com/user-attachments/assets/c2e90b37-9d58-4de0-9734-2b21c958b94a)
+
 
  
 ## 特点
