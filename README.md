@@ -6,6 +6,230 @@
 - `neural_network.py`: 包含基本网络组件（层、激活函数、优化器等）的实现
 - `models.py`: 包含不同模型架构的实现（MLP、CNN、ResNet）
 - `train.py`: 训练和测试的主程序
+## 代码功能拆解说明
+`models.py`
+- 基类`Model`，提供前向传播、后向传播、加载参数、切换训练模式的接口
+  ```bash
+  class Model(ABC):
+    """模型基类"""
+    def __init__(self):
+        self.layers = []
+    
+    @abstractmethod
+    def forward(self, X):
+        pass
+    
+    @abstractmethod
+    def backward(self, grad):
+        pass
+    
+    def __call__(self, X):
+        return self.forward(X)
+    
+    def set_train(self, training=True):
+        for layer in self.layers:
+            if hasattr(layer, 'set_train'):
+                layer.set_train(training)
+    
+    def save(self, file_path):
+        params = []
+        
+        for i, layer in enumerate(self.layers):
+            if hasattr(layer, 'params'):
+                layer_params = {
+                    'name': layer.__class__.__name__,
+                    'params': {k: v.copy() for k, v in layer.params.items()}
+                }
+                params.append(layer_params)
+            else:
+                params.append({'name': layer.__class__.__name__, 'params': None})
+        
+        with open(file_path, 'wb') as f:
+            pickle.dump(params, f)  
+    
+    def load(self, file_path):
+        """加载模型参数"""
+        with open(file_path, 'rb') as f:
+            params = pickle.load(f)
+        
+        param_idx = 0
+        for i, layer in enumerate(self.layers):
+            if hasattr(layer, 'params'):
+                if param_idx >= len(params):
+                    raise ValueError(f"参数文件中的参数数量不足")
+                
+                layer_params = params[param_idx]
+                if layer.__class__.__name__ != layer_params['name']:
+                    raise ValueError(f"层类型不匹配: 期望 {layer.__class__.__name__}, 得到 {layer_params['name']}")
+                
+                for k, v in layer_params['params'].items():
+                    if k in layer.params:
+                        layer.params[k] = v.copy()
+                        setattr(layer, k, layer.params[k])
+                param_idx += 1
+  ```
+- 轻量卷积网络，包含两个步长为二的卷积层，用于MNIST分类
+  ```bash
+  class CNN(Model):
+    """卷积神经网络模型）"""
+    def __init__(self, input_shape=(1, 28, 28), num_classes=10):
+        super().__init__()
+        
+        # 提取输入形状
+        in_channels, in_height, in_width = input_shape
+        
+        # 第一个卷积层 - 使用步长为2的卷积替代池化，减少操作次数
+        self.layers.append(Conv2D(in_channels, 16, kernel_size=3, stride=2, padding=1))
+        self.layers.append(ReLU())
+        
+        # 计算特征图尺寸
+        h = in_height // 2
+        w = in_width // 2
+        
+        # 第二个卷积层 - 直接使用步长为2的卷积，减少计算量
+        self.layers.append(Conv2D(16, 32, kernel_size=3, stride=2, padding=1))
+        self.layers.append(ReLU())
+        
+        # 计算特征图尺寸
+        h = h // 2
+        w = w // 2
+        
+        # 展平层
+        self.layers.append(Flatten())
+        
+        # 输出层 - 直接从卷积到输出
+        self.layers.append(Linear(32 * h * w, num_classes))
+    
+    def forward(self, X):
+        """前向传播"""
+        output = X
+        for layer in self.layers:
+            output = layer(output)
+        return output
+    
+    def backward(self, grad):
+        """反向传播"""
+        for layer in reversed(self.layers):
+            grad = layer.backward(grad)
+        return grad
+```
+- MLP多层感知机，配合后续动态隐藏层配置和正则化
+```bash
+
+class MLP(Model):
+    """多层感知机模型"""
+    def __init__(self, input_dim=784, hidden_dims=[256, 128], num_classes=10, use_dropout=True, dropout_rate=0.5):
+        super().__init__()
+        
+        # 输入层 -> 第一个隐藏层
+        self.layers.append(Linear(input_dim, hidden_dims[0], weight_decay=1e-4))
+        self.layers.append(ReLU())
+        if use_dropout:
+            self.layers.append(Dropout(dropout_rate))
+        
+        # 隐藏层
+        for i in range(len(hidden_dims) - 1):
+            self.layers.append(Linear(hidden_dims[i], hidden_dims[i+1], weight_decay=1e-4))
+            self.layers.append(ReLU())
+            if use_dropout:
+                self.layers.append(Dropout(dropout_rate))
+        
+        # 输出层
+        self.layers.append(Linear(hidden_dims[-1], num_classes))
+    
+    def forward(self, X):
+        """前向传播"""
+        # 确保输入是二维的
+        if len(X.shape) > 2:
+            X = X.reshape(X.shape[0], -1)
+        
+        output = X
+        for layer in self.layers:
+            output = layer(output)
+        return output
+    
+    def backward(self, grad):
+        """反向传播"""
+        for layer in reversed(self.layers):
+            grad = layer.backward(grad)
+        return grad
+```
+- 参差块：实现残差连接，为ResNet提供基础模块
+  ```bash
+  
+class ResidualBlock(Layer):
+    """残差块"""
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.layers = []
+        
+        # 第一个卷积层
+        self.layers.append(Conv2D(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, weight_decay=1e-4))
+        self.layers.append(BatchNorm2D(out_channels))
+        self.layers.append(ReLU())
+        
+        # 第二个卷积层
+        self.layers.append(Conv2D(out_channels, out_channels, kernel_size=3, padding=1, weight_decay=1e-4))
+        self.layers.append(BatchNorm2D(out_channels))
+        
+        # 是否需要下采样
+        self.shortcut = None
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = []
+            self.shortcut.append(Conv2D(in_channels, out_channels, kernel_size=1, stride=stride, weight_decay=1e-4))
+            self.shortcut.append(BatchNorm2D(out_channels))
+        
+        # 激活函数
+        self.activation = ReLU()
+    
+    def forward(self, X):
+        # 主路径
+        out = X
+        for layer in self.layers:
+            out = layer(out)
+        
+        # 短路径
+        if self.shortcut is not None:
+            shortcut = X
+            for layer in self.shortcut:
+                shortcut = layer(shortcut)
+        else:
+            shortcut = X
+        
+        # 合并主路径和短路径
+        out += shortcut
+        return self.activation(out)
+    
+    def backward(self, grad):
+        # 反向传播经过激活函数
+        grad = self.activation.backward(grad)
+        
+        # 保存初始梯度用于短路径
+        shortcut_grad = grad.copy()
+        
+        # 主路径反向传播
+        for layer in reversed(self.layers):
+            grad = layer.backward(grad)
+        
+        # 短路径反向传播
+        if self.shortcut is not None:
+            shortcut_out = shortcut_grad
+            for layer in reversed(self.shortcut):
+                shortcut_out = layer.backward(shortcut_out)
+            return grad + shortcut_out
+        else:
+            return grad + shortcut_grad
+    
+    def set_train(self, training=True):
+        for layer in self.layers:
+            if hasattr(layer, 'set_train'):
+                layer.set_train(training)
+        
+        if self.shortcut is not None:
+            for layer in self.shortcut:
+                if hasattr(layer, 'set_train'):
+                    layer.set_train(training)
+```
 
 ## 核心功能实现
 1. 网络结构的灵活配置：MLP 通过列表layers定义各层神经元数量，其中有输入层、隐藏层和输出层
@@ -50,7 +274,7 @@ class LeakyReLU(Layer):
 ```   
    - 实验结果：不同隐藏层MLP对比；MLP-2(512+128隐藏层)验证集准确率更高为92.2%，MLP-1（256+128隐藏层）验证集准确率为91.8%。更多隐藏层提升模型能力，不过需要正则化避免过拟合。
 2. 动量法优化训练
-- 通过`MomentumSGD`类实现动量更新，显著加速收敛
+- 通过`MomentumSGD`类实现动量更新，显著加速收敛**对应问题2**
 ```bash
 class MomentumSGD:
     """带动量的随机梯度下降优化器"""
@@ -84,7 +308,8 @@ class MomentumSGD:
                         setattr(layer, param_name, layer.params[param_name])
 ```
    - 实验结果：动量系数$`\beta`$影响：$`\beta`$=0.9相比原始SGD（$`\beta`$=0）减少训练振荡，收敛速度提升15%；验证集准确率从90.6%提升至94.6%
-3. L2正则化和dropout正则化，训练过程中随机将部分神经元输出置0，防止过拟合，通过`dropout`参数控制失活概率
+
+3. L2正则化和dropout正则化，训练过程中随机将部分神经元输出置0，防止过拟合，通过`dropout`参数控制失活概率**对应问题3和问题1**
 ```bash
 class Linear(Layer):
     """全连接层"""
@@ -131,11 +356,23 @@ class Dropout(Layer):
         self.training = True
         self.optimizable = False
 ```
+`BatchNorm2D`对输入数据进行标准化
+```bash
+class BatchNorm2D(Layer):
+    """批归一化层"""
+    def __init__(self, num_features, momentum=0.9, eps=1e-5):
+        super().__init__()
+        self.num_features = num_features
+        self.momentum = momentum
+        self.eps = eps
+```
    - 实验结果：
    - L2正则化：
         -  $`\lambda`$=0.001使验证准确率比无正则化高1.4%，缓解过拟合
         -  $`\lambda`$=0.01过大，导致欠拟合，准确率显著下降
-4. Softmax与交叉熵损失
+   - Dropout中p的影响
+        - p=0.5引入过多随机性，导致训练不稳定，准确率下降至86.6%，最优p值需要根据网络深度调整。
+4. Softmax与交叉熵损失，**对应问题4**
 ```bash
 class CrossEntropyLoss(Layer):
     """交叉熵损失函数"""
@@ -180,7 +417,9 @@ class CrossEntropyLoss(Layer):
 ```
    - 实验结果：交叉熵和MSE对比显示，交叉熵准确率91.4%，MSE准确率90.8%。Softmax+交叉熵更适配多分类任务，梯度更新更高效     
 5. 卷积神经网络CNN：集成自定义的`Conv2D`层，后续连接MLP。模型包括：
-  -Conv2D层：通过可学习的卷积核计算特征图，支持参数包括输入通道、输出通道、步长、填充。
+  - Conv2D层：通过可学习的卷积核计算特征图，支持参数包括输入通道、输出通道、步长、填充。
+  - **对于问题5**
+   
   ```bash
 class Conv2D(Layer):
     """二维卷积层"""
@@ -268,9 +507,7 @@ def forward(self, inputs):
    3. 学习率：0.01
    4. 验证频率：每五轮使用验证集评估一次
 
-## 结果分析
-- Dropout中p的影响
-   - p=0.5引入过多随机性，导致训练不稳定，准确率下降至86.6%，最优p值需要根据网络深度调整。
+## 模型的实际训练和性能测试
 - 卷积核权重可视化结果
    - `cnn_filters_layer1.png`提取CNN模型第一层卷积核
 ![cnn_filters_layer1](https://github.com/user-attachments/assets/0ef02e1a-cf44-46b6-bf89-ffcad942ef94)
@@ -290,11 +527,10 @@ def forward(self, inputs):
 ![model_comparison_loss](https://github.com/user-attachments/assets/1e7ea417-5395-4e3e-bd8d-bdc33e7913e6)
 - 测试结果
    - `test_accuracy_comparison.png``test_loss_comparison.png`分别是测试准确率和测试loss，可视化结果表明CNN在测试集表现是三者中最佳，改进MLP相比MLP在准确率和loss方面表现更好![test_accuracy_comparison](https://github.com/user-attachments/assets/9a2cda65-6acb-4365-9e33-1802b0aac305)![test_loss_comparison](https://github.com/user-attachments/assets/c2e90b37-9d58-4de0-9734-2b21c958b94a)
-
+（上述内容均在`train.py`中）
 
  
 ## 特点
-
 - 纯NumPy实现，不依赖任何深度学习框架
 - 支持多种模型架构：
   - 多层感知机 (MLP)
@@ -315,29 +551,8 @@ def forward(self, inputs):
 - 模型保存和加载
 - 权重可视化
 
-## 使用方法
-
-1. 确保数据集位于`./dataset/MNIST/`目录下
-2. 运行训练脚本：
-
-```bash
-python train.py
-```
-
-3. 按照提示选择模型类型、是否使用数据增强和优化器类型
-4. 训练完成后，将显示训练历史图表并在测试集上评估模型性能
-5. 模型保存在`./saved_models/`目录下
-6. 可视化图表保存在`./figs/`目录下
-
-## 实验记录
-
-- MLP模型: 测试集准确率约97%
-- CNN模型: 测试集准确率约99%
-- ResNet模型: 测试集准确率约99%
-
-## 项目要求满足对应
-
-本项目满足了以下要求：
+## 总结：项目要求满足对应
+本项目满足了1.2问题中的1~5项目：
 1. 自己实现神经网络的核心功能：
    - 手动实现了前向传播和反向传播
    - 实现了关键层（线性层、卷积层等）
