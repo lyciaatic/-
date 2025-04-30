@@ -157,7 +157,6 @@ class MLP(Model):
 ```
 - 参差块：实现残差连接，为ResNet提供基础模块
   ```bash
-  
 class ResidualBlock(Layer):
     """残差块"""
     def __init__(self, in_channels, out_channels, stride=1):
@@ -231,7 +230,6 @@ class ResidualBlock(Layer):
                 if hasattr(layer, 'set_train'):
                     layer.set_train(training)
 ```
-
 ## 核心功能实现
 1. 网络结构的灵活配置：MLP 通过列表layers定义各层神经元数量，其中有输入层、隐藏层和输出层
    ```bash
